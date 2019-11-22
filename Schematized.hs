@@ -70,14 +70,17 @@ getFeature = do
 
 type MySchema = '["x", "y"]
 
-getBig :: Schema MySchema => NotHaxl Int
-getBig = do
+getSum :: Schema MySchema => NotHaxl ()
+getSum = do
     x <- getX @MySchema
     y <- getY @MySchema
-    return $ x + y
+    lift $ print $ x + y
 
 getX :: forall s. HasFeature s "x" => NotHaxl Int
 getX = getFeature @s @"x"
 
 getY :: forall s. HasFeature s "y" => NotHaxl Int
 getY = getFeature @s @"y"
+
+main :: IO ()
+main = runReaderT (assertSchema @MySchema getSum) $ Map.fromList [("x", 10), ("y", 2)]
