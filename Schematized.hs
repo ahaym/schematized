@@ -3,31 +3,29 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE FunctionalDependencies #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
-{-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE TypeOperators #-}
 
-module Schema where
+module Schematized where
 
 import Control.Monad
 import Control.Monad.Reader
 import qualified Data.Map as Map
-import Data.Type.Bool
 import Data.Proxy
+import GHC.Exts
 import GHC.TypeLits
 import Unsafe.Coerce
 
 type NotHaxl = ReaderT (Map.Map String Int) IO
 
-class Schema (s :: [Symbol]) where
-    refl :: ()
-    refl = ()
+class Schema (s :: [Symbol]) o | o -> s
 
-newtype Reflector s a = Reflector { runReflector :: Schema s => NotHaxl a }
+newtype Reflector s a = Reflector { runReflector :: Schema s () => NotHaxl a }
 
 class ManySymbolVal (xs :: [Symbol]) where
   manySymbolVal :: proxy xs -> [String]
@@ -39,7 +37,7 @@ instance (KnownSymbol a, ManySymbolVal as) => ManySymbolVal (a ': as) where
   manySymbolVal _ = 
     symbolVal (Proxy :: Proxy a) : manySymbolVal (Proxy :: Proxy as)
 
-assertSchema :: forall (s :: [Symbol])  a. ManySymbolVal s => (Schema s => NotHaxl a) -> NotHaxl a
+assertSchema :: forall (s :: [Symbol])  a. ManySymbolVal s => (Schema s () => NotHaxl a) -> NotHaxl a
 assertSchema m = do
     env <- ask
     lift $ assertInput @s env
@@ -52,35 +50,15 @@ assertInput i = do
         error "verification failed"
     return ()
 
-type family Head (k :: [Symbol]) where
-    Head (k ': _) = k
-    Head '[] = ""
+class HasFeature (s :: [Symbol]) (k :: Symbol)
 
-type family InList (k :: Symbol) (s :: [Symbol]) where
-    InList _ '[] = 'False
-    InList k (k ': ks) = 'True
-    InList k (l ': ks) = InList k ks
+instance HasFeature (k ': s) k
 
-type HasFeature (s :: [Symbol]) (k :: Symbol) = (Schema s, InList k s ~ 'True)
+instance {-# OVERLAPPABLE #-} HasFeature s k => HasFeature (k0 ': s) k
 
-getFeature :: forall s x. (HasFeature s x, KnownSymbol x) => NotHaxl Int
+getFeature :: forall x s. (Schema s (), HasFeature s x, KnownSymbol x) => NotHaxl Int
 getFeature = do
     env <- ask
     return $ env Map.! (symbolVal (Proxy :: Proxy x))
 
-type MySchema = '["x", "y"]
-
-getSum :: Schema MySchema => NotHaxl ()
-getSum = do
-    x <- getX @MySchema
-    y <- getY @MySchema
-    lift $ print $ x + y
-
-getX :: forall s. HasFeature s "x" => NotHaxl Int
-getX = getFeature @s @"x"
-
-getY :: forall s. HasFeature s "y" => NotHaxl Int
-getY = getFeature @s @"y"
-
-main :: IO ()
-main = runReaderT (assertSchema @MySchema getSum) $ Map.fromList [("x", 10), ("y", 2)]
+type family Has (s0 :: [Symbol]) (s1 :: [Symbol]) :: Constraint
